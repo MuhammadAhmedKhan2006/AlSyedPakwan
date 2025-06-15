@@ -1,0 +1,15 @@
+release/main.o
+release/mainwindow.o
+release/ownerlogin.o
+release/salesmanlogin.o
+release/ownerdashboard.o
+release/inventory.o
+release/employeesalary.o
+release/salesmandashboard.o
+release/moc_mainwindow.o
+release/moc_ownerlogin.o
+release/moc_salesmanlogin.o
+release/moc_ownerdashboard.o
+release/moc_inventory.o
+release/moc_employeesalary.o
+release/moc_salesmandashboard.o

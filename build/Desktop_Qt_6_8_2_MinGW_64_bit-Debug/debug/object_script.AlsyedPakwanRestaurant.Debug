@@ -1,0 +1,15 @@
+debug/main.o
+debug/mainwindow.o
+debug/ownerlogin.o
+debug/salesmanlogin.o
+debug/ownerdashboard.o
+debug/inventory.o
+debug/employeesalary.o
+debug/salesmandashboard.o
+debug/moc_mainwindow.o
+debug/moc_ownerlogin.o
+debug/moc_salesmanlogin.o
+debug/moc_ownerdashboard.o
+debug/moc_inventory.o
+debug/moc_employeesalary.o
+debug/moc_salesmandashboard.o
