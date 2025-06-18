@@ -1,9 +1,13 @@
 #include "salesmandashboard.h"
 #include "mainwindow.h"
 #include <QScrollArea>
+#include <QDoubleValidator>
+#include <QApplication>
+#include <QFileInfo>
+#include <QDebug>
 
 SalesmanDashboard::SalesmanDashboard(QWidget *parent)
-    : QMainWindow(parent), orderTotal(0.0), selectedMenuItem(-1), lastBillText("")
+    : QMainWindow(parent), orderTotal(0.0), receivedAmount(0.0), changeAmount(0.0), selectedMenuItem(-1), lastBillText("")
 {
     setupUI();
     setTheme();
@@ -22,6 +26,15 @@ void SalesmanDashboard::setupUI()
     rightLayout = new QVBoxLayout();
     buttonLayout = new QHBoxLayout();
     orderButtonLayout = new QHBoxLayout();
+    paymentLayout = new QHBoxLayout();
+
+    // Menu Bar
+    menuBar = new QMenuBar(this);
+    QMenu *helpMenu = new QMenu("Help", this);
+    aboutAction = new QAction("About", this);
+    helpMenu->addAction(aboutAction);
+    menuBar->addMenu(helpMenu);
+    setMenuBar(menuBar);
 
     // Logo
     logoLabel = createLogo();
@@ -90,22 +103,53 @@ void SalesmanDashboard::setupUI()
     QLabel *billLabel = new QLabel("BILL PREVIEW", this);
     billLabel->setStyleSheet("font-size: 16px; font-weight: bold;");
 
+    customerLabel = new QLabel("Customer Name:", this);
+    customerNameEdit = new QLineEdit(this);
+    customerNameEdit->setPlaceholderText("Enter customer name");
+    customerNameEdit->setFixedHeight(30);
+
+    receivedLabel = new QLabel("Received: Rs. 0.00", this);
+    changeLabel = new QLabel("Change: Rs. 0.00", this);
+    receivedLabel->setStyleSheet("font-size: 14px; font-weight: bold;");
+    changeLabel->setStyleSheet("font-size: 14px; font-weight: bold;");
+
+    receivedAmountEdit = new QLineEdit(this);
+    receivedAmountEdit->setPlaceholderText("Enter amount received");
+    receivedAmountEdit->setFixedHeight(30);
+    receivedAmountEdit->setValidator(new QDoubleValidator(0.0, 100000.0, 2, this));
+
+    paymentLayout->addWidget(new QLabel("Amount Received:"));
+    paymentLayout->addWidget(receivedAmountEdit);
+
     billPreview = new QTextEdit(this);
     billPreview->setReadOnly(true);
     billPreview->setMinimumWidth(300);
 
     generateBillButton = new QPushButton("GENERATE BILL", this);
     printButton = new QPushButton("PRINT BILL", this);
+    dailySummaryButton = new QPushButton("GENERATE DAILY SUMMARY", this);
     generateBillButton->setMinimumHeight(40);
     printButton->setMinimumHeight(40);
+    dailySummaryButton->setMinimumHeight(40);
 
     buttonLayout->addWidget(generateBillButton);
     buttonLayout->addWidget(printButton);
+    buttonLayout->addWidget(dailySummaryButton);
     buttonLayout->addStretch();
 
     rightLayout->addWidget(billLabel);
+    rightLayout->addWidget(customerLabel);
+    rightLayout->addWidget(customerNameEdit);
     rightLayout->addWidget(billPreview);
+    rightLayout->addLayout(paymentLayout);
+    rightLayout->addWidget(receivedLabel);
+    rightLayout->addWidget(changeLabel);
     rightLayout->addLayout(buttonLayout);
+
+    // Developer Credit
+    developerLabel = new QLabel(QString("Developed by %1").arg(developerName), this);
+    developerLabel->setStyleSheet("font-size: 10px; color: #888888;");
+    developerLabel->setAlignment(Qt::AlignRight);
 
     // Content layout
     contentLayout->addLayout(leftLayout);
@@ -115,6 +159,7 @@ void SalesmanDashboard::setupUI()
     mainLayout->addLayout(logoLayout);
     mainLayout->addWidget(titleLabel);
     mainLayout->addLayout(contentLayout);
+    mainLayout->addWidget(developerLabel);
 
     // Connect signals
     connect(addButton, &QPushButton::clicked, this, &SalesmanDashboard::addToOrder);
@@ -122,11 +167,20 @@ void SalesmanDashboard::setupUI()
     connect(clearButton, &QPushButton::clicked, this, &SalesmanDashboard::clearOrder);
     connect(generateBillButton, &QPushButton::clicked, this, &SalesmanDashboard::generateBill);
     connect(printButton, &QPushButton::clicked, this, &SalesmanDashboard::printBill);
+    connect(dailySummaryButton, &QPushButton::clicked, this, &SalesmanDashboard::generateDailySummary);
     connect(logoutButton, &QPushButton::clicked, this, &SalesmanDashboard::logout);
     connect(orderList, &QListWidget::itemClicked, this, &SalesmanDashboard::onOrderItemClicked);
+    connect(receivedAmountEdit, &QLineEdit::textChanged, this, &SalesmanDashboard::updateReceivedAmount);
+    connect(aboutAction, &QAction::triggered, this, &SalesmanDashboard::showAboutDialog);
 
     setWindowTitle("Salesman Dashboard - Alsyed Pakwan");
     resize(1000, 700);
+
+    // Ensure logs directory exists
+    QDir dir;
+    if (!dir.exists("logs")) {
+        dir.mkdir("logs");
+    }
 }
 
 void SalesmanDashboard::setTheme()
@@ -154,7 +208,7 @@ void SalesmanDashboard::setTheme()
         "    border: 2px solid #4CAF50;"
         "    selection-background-color: #4CAF50;"
         "}"
-        "QSpinBox {"
+        "QSpinBox, QLineEdit {"
         "    background-color: #2d2d2d;"
         "    color: white;"
         "    border: 2px solid #4CAF50;"
@@ -170,12 +224,23 @@ void SalesmanDashboard::setTheme()
         "    background-color: #2d2d2d;"
         "    border: 2px solid #4CAF50;"
         "}"
+        "QMenuBar {"
+        "    background-color: #2d2d2d;"
+        "    color: white;"
+        "}"
+        "QMenu {"
+        "    background-color: #2d2d2d;"
+        "    color: white;"
+        "}"
+        "QAction {"
+        "    color: white;"
+        "}"
         );
 }
 
 QLabel* SalesmanDashboard::createLogo()
 {
-    QLabel* logo = new QLabel(this);
+    QLabel *logo = new QLabel(this);
     logo->setFixedSize(60, 60);
     logo->setStyleSheet(
         "QLabel {"
@@ -194,10 +259,7 @@ QLabel* SalesmanDashboard::createLogo()
 
 void SalesmanDashboard::loadMenuItems()
 {
-    // Clear existing menu
     menuItems.clear();
-
-    // Add sample menu items
     menuItems.append({"Chicken Biryani", 250.0, "Main Course"});
     menuItems.append({"Chicken Qorma", 200.0, "Main Course"});
     menuItems.append({"Chicken Karahi", 300.0, "Main Course"});
@@ -209,7 +271,6 @@ void SalesmanDashboard::loadMenuItems()
     menuItems.append({"Tea", 40.0, "Beverages"});
     menuItems.append({"Lassi", 80.0, "Beverages"});
 
-    // Populate menu grid
     int row = 0, col = 0;
     for (int i = 0; i < menuItems.size(); ++i) {
         QPushButton *itemButton = new QPushButton(menuItems[i].name + "\nRs. " + QString::number(menuItems[i].price, 'f', 2), this);
@@ -236,7 +297,6 @@ void SalesmanDashboard::addToOrder()
     int quantity = quantitySpinBox->value();
     const MenuItem& menuItem = menuItems[selectedMenuItem];
 
-    // Check if item already exists in order
     for (OrderItem& orderItem : currentOrder) {
         if (orderItem.name == menuItem.name) {
             orderItem.quantity += quantity;
@@ -246,7 +306,6 @@ void SalesmanDashboard::addToOrder()
         }
     }
 
-    // Add new item to order
     OrderItem newItem;
     newItem.name = menuItem.name;
     newItem.price = menuItem.price;
@@ -272,6 +331,10 @@ void SalesmanDashboard::removeFromOrder()
 void SalesmanDashboard::clearOrder()
 {
     currentOrder.clear();
+    customerNameEdit->clear();
+    receivedAmountEdit->clear();
+    receivedAmount = 0.0;
+    changeAmount = 0.0;
     updateOrderTotal();
     billPreview->clear();
     lastBillText = "";
@@ -288,6 +351,19 @@ void SalesmanDashboard::updateOrderTotal()
     }
 
     totalLabel->setText("Total: Rs. " + QString::number(orderTotal, 'f', 2));
+    updateReceivedAmount();
+}
+
+void SalesmanDashboard::updateReceivedAmount()
+{
+    bool ok;
+    receivedAmount = receivedAmountEdit->text().toDouble(&ok);
+    if (!ok) {
+        receivedAmount = 0.0;
+    }
+    changeAmount = receivedAmount - orderTotal;
+    receivedLabel->setText("Received: Rs. " + QString::number(receivedAmount, 'f', 2));
+    changeLabel->setText("Change: Rs. " + QString::number(changeAmount < 0 ? 0.0 : changeAmount, 'f', 2));
 }
 
 void SalesmanDashboard::generateBill()
@@ -297,33 +373,170 @@ void SalesmanDashboard::generateBill()
         return;
     }
 
+    customerName = customerNameEdit->text().isEmpty() ? "Guest" : customerNameEdit->text();
     createBillText();
     billPreview->setText(lastBillText);
+    saveBillToDailyLog();
 }
 
 void SalesmanDashboard::createBillText()
 {
-    QString billText = "=============================\n";
-    billText += "      ALSYED PAKWAN\n";
-    billText += "      RESTAURANT BILL\n";
-    billText += "=============================\n";
-    billText += "Date: " + QDateTime::currentDateTime().toString("dd-MM-yyyy hh:mm:ss") + "\n";
-    billText += "-----------------------------\n";
-    billText += "Item            Qty    Total\n";
-    billText += "-----------------------------\n";
+    QString billText = "================================\n";
+    billText += "         ALSYED PAKWAN\n";
+    billText += "         RESTAURANT BILL\n";
+    billText += "================================\n";
+    billText += QString("Date: %1\n").arg(QDateTime::currentDateTime().toString("dd-MM-yyyy hh:mm:ss"));
+    billText += QString("Customer: %1\n").arg(customerName.left(23));
+    billText += "--------------------------------\n";
+    billText += "Item               Qty  Total\n";
+    billText += "--------------------------------\n";
 
     for (const OrderItem& item : currentOrder) {
-        billText += item.name.leftJustified(15, ' ');
-        billText += QString::number(item.quantity).rightJustified(4, ' ');
-        billText += QString::number(item.total, 'f', 2).rightJustified(10, ' ') + "\n";
+        QString name = item.name.left(18);
+        billText += name.leftJustified(18);
+        billText += QString::number(item.quantity).rightJustified(6);
+        billText += QString::number(item.total, 'f', 2).rightJustified(8);
+        billText += "\n";
     }
 
-    billText += "-----------------------------\n";
-    billText += "Total: Rs. " + QString::number(orderTotal, 'f', 2) + "\n";
-    billText += "=============================\n";
+    billText += "--------------------------------\n";
+    billText += QString("Total: Rs %1\n").arg(QString::number(orderTotal, 'f', 2).rightJustified(8));
+    billText += QString("Received: Rs %1\n").arg(QString::number(receivedAmount, 'f', 2).rightJustified(8));
+    billText += QString("Change: Rs %1\n").arg(QString::number(changeAmount < 0 ? 0.0 : changeAmount, 'f', 2).rightJustified(8));
+    billText += "================================\n";
     billText += "Thank you for dining with us!\n";
+    billText += QString("%1\n").arg(developerName);
+    billText += QString("%1\n").arg(developerContact);
+    billText += QString("%1\n\n").arg(developerFacebook);
 
     lastBillText = billText;
+}
+
+void SalesmanDashboard::saveBillToDailyLog()
+{
+    QString dateStr = QDate::currentDate().toString("yyyy-MM-dd");
+    QString filePath = QString("logs/daily_log_%1.txt").arg(dateStr);
+    QFile file(filePath);
+    if (!file.open(QIODevice::Append | QIODevice::Text)) {
+        QMessageBox::warning(this, "Preview", "Error", "Unable to save bill to daily log!");
+        return;
+    }
+
+    QTextStream out(&file);
+    out << "===== Bill Generated at " << QDateTime::currentDateTime().toString("dd-MM-yyyy hh:mm:ss") << " =====\n";
+    out << "Customer: " << customerName << "\n";
+    for (const OrderItem& item : currentOrder) {
+        out << item.name << "," << item.quantity << "," << item.total << "\n";
+    }
+    out << "Total: " << orderTotal << "\n";
+    out << "Received: " << receivedAmount << "\n";
+    out << "Change: " << (changeAmount < 0 ? 0.0 : changeAmount) << "\n";
+    out << "====================================\n\n";
+    file.close();
+}
+
+void SalesmanDashboard::generateDailySummary()
+{
+    QString dateStr = QDate::currentDate().toString("yyyy-MM-dd");
+    QString logFilePath = QString("logs/daily_log_%1.txt").arg(dateStr);
+    QFile logFile(logFilePath);
+
+    if (!logFile.exists()) {
+        QMessageBox::warning(this, "Error", "No bills generated today!");
+        return;
+    }
+
+    if (!logFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        QMessageBox::warning(this, "Error", "Unable to open daily log file!");
+        return;
+    }
+
+    QString summaryText;
+    createDailySummaryText(summaryText);
+
+    logFile.close(); // Ensure file is closed before saving
+
+    // Save summary to file
+    QString summaryFilePath = QString("logs/daily_summary_%1.txt").arg(dateStr);
+    QFile summaryFile(summaryFilePath);
+    if (!summaryFile.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        QMessageBox::warning(this, "Error", "Unable to save daily summary!");
+        return;
+    }
+
+    QTextStream out(&summaryFile);
+    out << summaryText;
+    summaryFile.close();
+
+    // Display summary in bill preview
+    billPreview->setText(summaryText);
+    QMessageBox::information(this, "Success", QString("Daily summary saved to %1").arg(summaryFilePath));
+}
+
+void SalesmanDashboard::createDailySummaryText(QString &summaryText)
+{
+    QString dateStr = QDate::currentDate().toString("yyyy-MM-dd");
+    QString logFilePath = QString("logs/daily_log_%1.txt").arg(dateStr);
+    QFile logFile(logFilePath);
+
+    if (!logFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        summaryText = "Error: Unable to read daily log!";
+        return;
+    }
+
+    QTextStream in(&logFile);
+    QMap<QString, QPair<int, double>> itemSummary; // Item -> (Quantity, Total)
+    double totalSales = 0.0;
+    int billCount = 0;
+
+    while (!in.atEnd()) {
+        QString line = in.readLine();
+        if (line.startsWith("===== Bill Generated")) {
+            billCount++;
+            continue;
+        }
+        if (line.startsWith("Total: ")) {
+            totalSales += line.mid(7).toDouble();
+            continue;
+        }
+        if (!line.contains(",") || line.startsWith("Customer:") || line.startsWith("Received:") || line.startsWith("Change:") || line.isEmpty()) {
+            continue;
+        }
+
+        QStringList parts = line.split(",");
+        if (parts.size() == 3) {
+            QString itemName = parts[0];
+            int quantity = parts[1].toInt();
+            double total = parts[2].toDouble();
+            itemSummary[itemName].first += quantity;
+            itemSummary[itemName].second += total;
+        }
+    }
+    logFile.close();
+
+    summaryText = "====================================\n";
+    summaryText += "         ALSYED PAKWAN\n";
+    summaryText += "      DAILY SUMMARY REPORT\n";
+    summaryText += "====================================\n";
+    summaryText += QString("Date: %1\n").arg(QDate::currentDate().toString("dd-MM-yyyy"));
+    summaryText += QString("Total Bills: %1\n").arg(billCount);
+    summaryText += QString("Total Sales: Rs %1\n").arg(QString::number(totalSales, 'f', 2).rightJustified(8));
+    summaryText += "------------------------------------\n";
+    summaryText += "Item               Qty  Total\n";
+    summaryText += "------------------------------------\n";
+
+    for (auto it = itemSummary.constBegin(); it != itemSummary.constEnd(); ++it) {
+        QString name = it.key().left(18);
+        summaryText += name.leftJustified(18);
+        summaryText += QString::number(it.value().first).rightJustified(6);
+        summaryText += QString::number(it.value().second, 'f', 2).rightJustified(8);
+        summaryText += "\n";
+    }
+
+    summaryText += "====================================\n";
+    summaryText += QString("%1\n").arg(developerName);
+    summaryText += QString("%1\n").arg(developerContact);
+    summaryText += QString("%1\n\n").arg(developerFacebook);
 }
 
 void SalesmanDashboard::printBill()
@@ -341,6 +554,20 @@ void SalesmanDashboard::printBill()
         doc.print(&printer);
         QMessageBox::information(this, "Success", "Bill printed successfully!");
     }
+}
+
+void SalesmanDashboard::showAboutDialog()
+{
+    QString aboutText = QString(
+                            "Alsyed Pakwan Point of Sale System\n"
+                            "Version 1.0\n"
+                            "Developed by %1\n"
+                            "%2\n"
+                            "%3\n"
+                            "This software is provided free of charge for Alsyed Pakwan.\n"
+                            ).arg(developerName, developerContact, developerFacebook);
+
+    QMessageBox::about(this, "About Alsyed Pakwan POS", aboutText);
 }
 
 void SalesmanDashboard::onMenuItemClicked()
